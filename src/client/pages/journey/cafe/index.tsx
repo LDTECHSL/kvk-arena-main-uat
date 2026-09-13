@@ -36,6 +36,7 @@ type PopularChoice = {
   serving: string;
   includes: string[];
   image?: string;
+  facts?: string;
 };
 
 const getImageSource = (image?: string | null) => {
@@ -59,6 +60,7 @@ const mapCafeMenuItem = (item: CafeMenuResponse): PopularChoice => ({
     ? item.ingredients.split(",").map((ingredient) => ingredient.trim())
     : [],
   image: getImageSource(item.image),
+  facts: item.facts ? item.facts : "Pair your breakfast with a rich, aromatic coffee for the ultimate morning experience.",
 });
 
 export default function CafeJourney() {
@@ -136,8 +138,6 @@ export default function CafeJourney() {
       return;
     }
 
-    let refreshTimer: number | undefined;
-
     const ctx = gsap.context(() => {
       const getScrollDistance = () =>
         Math.max(0, track.scrollWidth - window.innerWidth);
@@ -145,13 +145,10 @@ export default function CafeJourney() {
       const getPinDuration = () =>
         Math.max(getScrollDistance(), window.innerHeight * 0.35);
 
-      // Use one controlled tween instead of creating a new tween every
-      // refresh. This prevents stale tweens from fighting each other.
       const horizontalTween = gsap.to(track, {
         x: () => -getScrollDistance(),
         ease: "none",
         paused: true,
-        overwrite: "auto",
       });
 
       const trigger = ScrollTrigger.create({
@@ -162,53 +159,24 @@ export default function CafeJourney() {
         scrub: 0.8,
         pin: true,
         pinSpacing: true,
-        anticipatePin: 0,
         invalidateOnRefresh: true,
-        fastScrollEnd: false,
-        preventOverlaps: true,
-        refreshPriority: 1,
       });
 
-      const refreshSafely = () => {
-        window.clearTimeout(refreshTimer);
-
-        refreshTimer = window.setTimeout(() => {
-          if (!section.isConnected || !track.isConnected) return;
-
-          // Reset before measuring so ScrollTrigger never measures an
-          // already-translated track.
-          gsap.set(track, { x: 0 });
-
-          trigger.refresh();
-          ScrollTrigger.refresh();
-        }, 80);
+      const handleRefresh = () => {
+        if (!section.isConnected || !track.isConnected) return;
+        trigger.refresh();
       };
 
-      refreshSafely();
-
-      window.addEventListener("load", refreshSafely);
-      window.addEventListener("resize", refreshSafely);
-      window.addEventListener("orientationchange", refreshSafely);
-
-      // Dynamic menu images/content can change the track width after mount.
-      const resizeObserver = new ResizeObserver(refreshSafely);
-      resizeObserver.observe(section);
-      resizeObserver.observe(track);
+      window.addEventListener("load", handleRefresh);
 
       return () => {
-        window.removeEventListener("load", refreshSafely);
-        window.removeEventListener("resize", refreshSafely);
-        window.removeEventListener("orientationchange", refreshSafely);
-        resizeObserver.disconnect();
-        window.clearTimeout(refreshTimer);
-
+        window.removeEventListener("load", handleRefresh);
         trigger.kill();
         horizontalTween.kill();
       };
     }, section);
 
     return () => {
-      window.clearTimeout(refreshTimer);
       ctx.revert();
     };
   }, [menuItems.length]);
@@ -644,8 +612,8 @@ export default function CafeJourney() {
                   </p>
 
                   <p className="mt-2 text-sm leading-6 text-[#bda99b]">
-                    Pair this breakfast with an espresso, cappuccino or iced
-                    coffee for a complete cafe experience.
+                    {selectedChoice.facts ||
+                      "Pair your breakfast with a rich, aromatic coffee for the ultimate morning experience."}
                   </p>
                 </div>
               </div>
