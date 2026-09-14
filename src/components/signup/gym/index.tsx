@@ -67,6 +67,35 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
     password: "",
   });
 
+  const resetSignupState = () => {
+    setStep(1);
+    setGender(null);
+    setConfirm(false);
+    setSelectedPlan(null);
+    setPageAlert({ visible: false });
+    setLoading(false);
+    setPaymentInProgress(false);
+    setServerError(null);
+    setErrors({});
+    setAuthMode("signup");
+    setForm({
+      firstName: "",
+      lastName: "",
+      email: "",
+      phone: "",
+      dob: "",
+      password: "",
+    });
+    setLoginForm({ email: "", password: "" });
+    localStorage.removeItem("newMemberId");
+  };
+
+  const handleClose = async () => {
+    await handleReverse();
+    resetSignupState();
+    onClose();
+  };
+
   const handleChange = (e: any) => {
     setForm({ ...form, [e.target.name]: e.target.value });
   };
@@ -150,7 +179,23 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
       newErrors.phone = "Phone number must be 9 digits and start with 7";
     }
 
-    if (!form.dob) newErrors.dob = "Date of birth is required";
+    if (!form.dob) {
+      newErrors.dob = "Date of birth is required";
+    } else {
+      const [year, month, day] = form.dob.split("-").map(Number);
+      const date = new Date(year, month - 1, day);
+      const today = new Date();
+      const isValidDate =
+        /^\d{4}-\d{2}-\d{2}$/.test(form.dob) &&
+        date.getFullYear() === year &&
+        date.getMonth() === month - 1 &&
+        date.getDate() === day;
+      const isReasonableDate = date >= new Date(1900, 0, 1) && date <= today;
+
+      if (!isValidDate || !isReasonableDate) {
+        newErrors.dob = "Please enter a valid date of birth";
+      }
+    }
 
     if (!gender) newErrors.gender = "Please select gender";
 
@@ -216,6 +261,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
           console.log("Payment success:", orderId);
           localStorage.removeItem("pendingMembershipPayment");
           setPaymentInProgress(false);
+          resetSignupState();
           window.location.reload();
         };
 
@@ -411,7 +457,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
       <div className="relative w-full max-w-6xl min-h-[90vh] overflow-y-auto max-h-[95vh] md:overflow-hidden rounded-[32px] bg-white shadow-[0_40px_100px_rgba(0,0,0,0.25)]">
         {/* CLOSE */}
         <button
-          onClick={onClose}
+          onClick={handleClose}
           className="absolute right-5 top-5 z-50 flex h-10 w-10 cursor-pointer items-center justify-center rounded-full bg-black/10 hover:bg-black/20"
         >
           <X className="h-4 w-4" />
@@ -716,6 +762,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
                       name="dob"
                       value={form.dob}
                       onChange={handleChange}
+                      min="1900-01-01"
                       max={new Date().toLocaleDateString("en-CA")}
                       className="h-10 w-full rounded-xl border border-slate-200 px-3 text-sm outline-none focus:border-[#296BE1] focus:ring-4 focus:ring-[#296BE1]/10"
                     />
