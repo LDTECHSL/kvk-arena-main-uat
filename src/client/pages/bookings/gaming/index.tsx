@@ -20,7 +20,8 @@ import { getGamingCategories } from "@/services/gaming-category-api";
 import { getGamingStationsByCategory } from "@/services/gaming-station-api";
 import { getGamingSlotAvailability } from "@/services/gaming-slot-api";
 import { getAdditionalPurchasesByCategory } from "@/services/additional-purchase-api";
-import { holdGamingBookingSlots, confirmGamingBooking } from "@/services/gaming-booking-api";
+import { holdGamingBookingSlots, confirmGamingBooking, createGamingMultiPayment } from "@/services/gaming-booking-api";
+import { startPayHereCheckout } from "@/services/payhere";
 import Alert from "@/components/alert";
 
 type GamingCategory = {
@@ -71,8 +72,6 @@ type BookingDay = {
   month: string;
   isToday: boolean;
 };
-
-type PaymentType = 1 | 2;
 
 const CATEGORY_ICONS: Record<string, any> = {
   PC: Monitor,
@@ -129,8 +128,8 @@ export default function BookingGaming() {
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerNameError, setCustomerNameError] = useState("");
   const [customerPhoneError, setCustomerPhoneError] = useState("");
-  const [paymentType, setPaymentType] = useState<PaymentType>(1);
   const [holdIds, setHoldIds] = useState<string[]>([]);
   const [holdExpiresAt, setHoldExpiresAt] = useState<number | null>(null);
   const [remainingSeconds, setRemainingSeconds] = useState(HOLD_DURATION_SECONDS);
@@ -404,6 +403,8 @@ export default function BookingGaming() {
     }
 
     const availableStations = stations.filter((station) => {
+      if (!station.isActive) return false;
+
       const slot = (stationSlots[station.id] ?? []).find(
         (item) => item.startTime === slotTime.startTime
       );
@@ -417,12 +418,23 @@ export default function BookingGaming() {
   const total = useMemo(() => {
     if (!selectedCategory || selectedSlots.length === 0) return 0;
 
-    const selectedStationsPrice = stations
-      .filter((station) => selectedStations.includes(station.id))
-      .reduce((sum, station) => sum + (station.price || selectedCategory.price), 0);
+    // Price per booking comes from the slot itself (kept in sync with the
+    // cashier's slot configuration), not the station's own static price —
+    // that field is set once at station creation and never updated.
+    const baseAmount = selectedSlots.reduce((slotSum, slotIndex) => {
+      const slotTime = masterSlots[slotIndex];
+      if (!slotTime) return slotSum;
 
-    const baseAmount =
-      (selectedStationsPrice || selectedCategory.price) * selectedSlots.length;
+      const stationsSum = selectedStations.reduce((sum, stationId) => {
+        const slot = (stationSlots[stationId] ?? []).find(
+          (item) => item.startTime === slotTime.startTime
+        );
+        const price = slot?.price ?? selectedCategory.price;
+        return sum + price;
+      }, 0);
+
+      return slotSum + stationsSum;
+    }, 0);
 
     const additionalAmount =
       additionalPurchases.reduce((sum, purchase) => {
@@ -435,7 +447,8 @@ export default function BookingGaming() {
     selectedCategory,
     selectedSlots,
     selectedStations,
-    stations,
+    masterSlots,
+    stationSlots,
     additionalPurchases,
     purchaseQuantities,
   ]);
@@ -584,7 +597,7 @@ export default function BookingGaming() {
     setIsCloseConfirmOpen(false);
   };
 
-  const confirmCloseBookingModal = () => {
+  const confirmCloseBookingModal = async () => {
     if (remainingSeconds <= 0) {
       window.location.reload();
       return;
@@ -594,9 +607,13 @@ export default function BookingGaming() {
     setIsBookingModalOpen(false);
     setCustomerName("");
     setCustomerPhone("");
+    setCustomerNameError("");
     setCustomerPhoneError("");
     setHoldIds([]);
     setHoldExpiresAt(null);
+    setSelectedSlots([]);
+    setSelectedStations([]);
+    setPurchaseQuantities({});
 
     setPageAlert({
       visible: true,
@@ -605,6 +622,8 @@ export default function BookingGaming() {
       description:
         "Your selected slots are still reserved for a few more minutes. If you don't complete the booking, they will automatically become available again once the 7-minute hold expires.",
     });
+
+    await refreshStationSlots();
   };
 
   /* -------------------------------------------------------------------------- */
@@ -613,6 +632,10 @@ export default function BookingGaming() {
 
   const handleConfirmBooking = async () => {
     if (!customerName.trim() || !customerPhone.trim()) {
+      if (!customerName.trim()) {
+        setCustomerNameError("Please enter the customer name.");
+      }
+
       if (!customerPhone.trim()) {
         setCustomerPhoneError(
           "Please enter a mobile number starting with 07 and containing exactly 10 digits."
@@ -645,6 +668,7 @@ export default function BookingGaming() {
       return;
     }
 
+    setCustomerNameError("");
     setCustomerPhoneError("");
 
     if (remainingSeconds <= 0 || holdIds.length === 0) {
@@ -660,47 +684,131 @@ export default function BookingGaming() {
 
     setIsConfirming(true);
 
+    const trimmedName = customerName.trim();
+    const trimmedPhone = customerPhone.trim();
+
+    const finalizeAfterPayment = async () => {
+      try {
+        await confirmGamingBooking({
+          holdIds,
+          customerDetails: {
+            customerName: trimmedName,
+            phoneNumber: trimmedPhone,
+            paymentType: 2,
+          },
+        });
+
+        setPageAlert({
+          visible: true,
+          variant: "success",
+          title: "Booking confirmed",
+          description: "The gaming booking was confirmed successfully.",
+        });
+
+        setSelectedSlots([]);
+        setSelectedStations([]);
+        setPurchaseQuantities({});
+        setIsBookingModalOpen(false);
+        setCustomerName("");
+        setCustomerPhone("");
+        setHoldIds([]);
+        setHoldExpiresAt(null);
+
+        await refreshStationSlots();
+      } catch (error) {
+        const message =
+          (error as any)?.response?.data?.message ||
+          (error as any)?.message ||
+          "Unable to confirm the booking.";
+
+        setPageAlert({
+          visible: true,
+          variant: "error",
+          title: "Confirmation failed",
+          description: message,
+        });
+      } finally {
+        setIsConfirming(false);
+      }
+    };
+
     try {
-      await confirmGamingBooking({
+      const paymentResponse = await createGamingMultiPayment({
         holdIds,
-        customerDetails: {
-          customerName: customerName.trim(),
-          phoneNumber: customerPhone.trim(),
-          paymentType,
-        },
+        customerName: trimmedName,
+        phoneNumber: trimmedPhone,
       });
 
-      setPageAlert({
-        visible: true,
-        variant: "success",
-        title: "Booking confirmed",
-        description: "The gaming booking was confirmed successfully.",
-      });
+      console.log("[Gaming] payment creation response:", paymentResponse);
 
-      setSelectedSlots([]);
-      setSelectedStations([]);
-      setPurchaseQuantities({});
+      const payment =
+        paymentResponse?.additionalData?.response ??
+        paymentResponse?.response ??
+        paymentResponse;
+
+      // Close our own full-screen modal before handing off to PayHere — having
+      // two overlays open at once risks one burying the other (z-index conflict).
       setIsBookingModalOpen(false);
-      setCustomerName("");
-      setCustomerPhone("");
-      setHoldIds([]);
-      setHoldExpiresAt(null);
 
-      await refreshStationSlots();
+      startPayHereCheckout(
+        {
+          orderId: payment.orderId,
+          merchantId: payment.merchantId,
+          currency: payment.currency,
+          amount: payment.amount,
+          hash: payment.hash,
+          items: "Gaming Booking",
+          firstName: trimmedName,
+          phone: trimmedPhone,
+          notifyPath: "gaming-m/gaming-bookings/notify",
+        },
+        {
+          onCompleted: () => {
+            void finalizeAfterPayment();
+          },
+          onDismissed: () => {
+            setIsConfirming(false);
+            setIsBookingModalOpen(true);
+            setPageAlert({
+              visible: true,
+              variant: "warning",
+              title: "Payment cancelled",
+              description:
+                "Your selected slots are still held for a few more minutes. Complete payment to confirm your booking.",
+            });
+          },
+          onError: () => {
+            setIsConfirming(false);
+            setIsBookingModalOpen(true);
+            setPageAlert({
+              visible: true,
+              variant: "error",
+              title: "Payment failed",
+              description:
+                "Something went wrong while processing your payment. Please try again.",
+            });
+          },
+        },
+      );
+
+      // Hand off to the PayHere popup — turn off our own overlay so it isn't
+      // hidden behind it while the customer completes payment.
+      setIsConfirming(false);
     } catch (error) {
+      setIsConfirming(false);
+      setIsBookingModalOpen(true);
+
       const message =
         (error as any)?.response?.data?.message ||
         (error as any)?.message ||
-        "Unable to confirm the booking.";
+        "Unable to initiate payment.";
 
       setPageAlert({
         visible: true,
         variant: "error",
-        title: "Confirmation failed",
+        title: "Payment initiation failed",
         description: message,
       });
-    } finally {
-      setIsConfirming(false);
     }
   };
 
@@ -877,7 +985,7 @@ export default function BookingGaming() {
                 <h3 className="text-lg font-semibold mb-3">Select Station</h3>
 
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
-                  {stations.map((station) => {
+                  {stations.filter((station) => station.isActive).map((station) => {
                     const allSelectedSlotsAvailable = selectedSlots.every((slotIndex) => {
                       const availability = getSlotAvailability(slotIndex);
 
@@ -923,7 +1031,7 @@ export default function BookingGaming() {
                   selectedSlots.length === 0 ? "opacity-40 pointer-events-none" : ""
                 }`}
               >
-                <h3 className="text-lg font-semibold">Additional Purchases</h3>
+                <h3 className="text-lg font-semibold">Consoles</h3>
 
                 {additionalPurchases.map((purchase) => {
                   const quantity = purchaseQuantities[purchase.id] ?? 0;
@@ -1121,21 +1229,36 @@ export default function BookingGaming() {
                   <div className="grid gap-4 sm:grid-cols-2">
                     <label className="block">
                       <span className="mb-2 block text-xs font-bold text-gray-700">
-                        Customer Name
+                        Customer Name <span className="text-red-500">*</span>
                       </span>
 
                       <input
                         type="text"
+                        required
+                        aria-invalid={Boolean(customerNameError)}
                         value={customerName}
-                        onChange={(event) => setCustomerName(event.target.value)}
+                        onChange={(event) => {
+                          setCustomerName(event.target.value);
+                          setCustomerNameError("");
+                        }}
                         placeholder="Enter customer name"
-                        className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none transition focus:border-red-500 focus:ring-4 focus:ring-red-100"
+                        className={`h-12 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-4 focus:ring-red-100 ${
+                          customerNameError
+                            ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                            : "border-gray-200 focus:border-red-500"
+                        }`}
                       />
+
+                      {customerNameError && (
+                        <span className="mt-1.5 block text-xs font-medium text-red-600" role="alert">
+                          {customerNameError}
+                        </span>
+                      )}
                     </label>
 
                     <label className="block">
                       <span className="mb-2 block text-xs font-bold text-gray-700">
-                        Customer Mobile No
+                        Customer Mobile No <span className="text-red-500">*</span>
                       </span>
 
                       <input
@@ -1165,37 +1288,6 @@ export default function BookingGaming() {
                         </span>
                       )}
                     </label>
-                  </div>
-                </div>
-
-                {/* Payment type */}
-                <div className="rounded-2xl border border-gray-100 bg-white p-4 sm:p-5">
-                  <h4 className="text-sm font-bold text-gray-900 mb-4">Payment Type</h4>
-
-                  <div className="grid grid-cols-2 gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setPaymentType(1)}
-                      className={`h-12 rounded-xl border font-semibold text-sm transition cursor-pointer ${
-                        paymentType === 1
-                          ? "bg-red-500 border-red-500 text-white"
-                          : "bg-white border-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Cash
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => setPaymentType(2)}
-                      className={`h-12 rounded-xl border font-semibold text-sm transition cursor-pointer ${
-                        paymentType === 2
-                          ? "bg-red-500 border-red-500 text-white"
-                          : "bg-white border-gray-200 text-gray-700"
-                      }`}
-                    >
-                      Card
-                    </button>
                   </div>
                 </div>
 
@@ -1300,7 +1392,7 @@ export default function BookingGaming() {
 
                 <button
                   type="button"
-                  onClick={confirmCloseBookingModal}
+                  onClick={() => void confirmCloseBookingModal()}
                   className="h-11 flex-1 cursor-pointer rounded-xl bg-amber-500 text-sm font-semibold text-white transition hover:bg-amber-600"
                 >
                   Close Anyway

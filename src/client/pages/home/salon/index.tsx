@@ -5,6 +5,8 @@ import CafeFooter from "@/components/footer/cafe";
 import SalonHeader from "@/components/header/salon";
 import SalonHero from "../../hero/salon";
 import SalonAdd1 from "../../adds/salon";
+import SalonAdd2 from "../../adds/salon2";
+import SalonServices from "../../salon-services";
 import SalonBooking from "../../bookings/salon";
 
 export default function SalonHome() {
@@ -44,7 +46,13 @@ export default function SalonHome() {
       <SalonHeader />
       <SalonHero />
       <SalonAdd1 />
-      <SalonBooking />
+      <section id="booking">
+        <SalonBooking />
+      </section>
+      <section id="services">
+        <SalonServices />
+      </section>
+      <SalonAdd2 />
       <CafeFooter />
 
       <div className="fixed bottom-6 right-4 z-50 flex items-end gap-3 sm:bottom-8 sm:right-6">
@@ -62,7 +70,7 @@ export default function SalonHome() {
             type="button"
             onClick={scrollToTop}
             aria-label="Scroll back to top"
-            className="flex cursor-pointer h-13 w-13 items-center justify-center rounded-full bg-[#cd853f] text-white shadow-[0_18px_45px_rgba(41,107,225,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_55px_rgba(41,107,225,0.42)]"
+            className="flex cursor-pointer h-13 w-13 items-center justify-center rounded-full bg-gradient-to-br from-[#7C3AED] to-[#5B21B6] text-white shadow-[0_18px_45px_rgba(91,33,182,0.35)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_22px_55px_rgba(91,33,182,0.45)]"
           >
             <svg
               viewBox="0 0 24 24"

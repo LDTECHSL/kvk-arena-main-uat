@@ -18,9 +18,10 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import { getCourts } from "@/services/court-api";
-import { bookingSlots, confirmBooking } from "@/services/booking-api";
+import { bookingSlots, confirmBooking, createBadmintonMultiPayment } from "@/services/booking-api";
 import { getNextWorkingDays } from "@/services/holidays-api";
 import { getCourtSlotsAvailability } from "@/services/court-slot-api";
+import { startPayHereCheckout } from "@/services/payhere";
 import Alert from "@/components/alert";
 import { createPortal } from "react-dom";
 
@@ -109,6 +110,7 @@ export default function BadmintonBookings() {
   const [isCloseConfirmOpen, setIsCloseConfirmOpen] = useState(false);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
+  const [customerNameError, setCustomerNameError] = useState("");
   const [customerPhoneError, setCustomerPhoneError] = useState("");
   const [holdIds, setHoldIds] = useState<string[]>([]);
   const [holdExpiresAt, setHoldExpiresAt] = useState<number | null>(null);
@@ -546,6 +548,10 @@ export default function BadmintonBookings() {
       !customerName.trim() ||
       !customerPhone.trim()
     ) {
+      if (!customerName.trim()) {
+        setCustomerNameError("Please enter the customer name.");
+      }
+
       if (!customerPhone.trim()) {
         setCustomerPhoneError(
           "Please enter a mobile number starting with 07 and containing exactly 10 digits."
@@ -579,6 +585,7 @@ export default function BadmintonBookings() {
       return;
     }
 
+    setCustomerNameError("");
     setCustomerPhoneError("");
 
     if (remainingSeconds <= 0 || holdIds.length === 0) {
@@ -595,53 +602,135 @@ export default function BadmintonBookings() {
 
     setLoading(true);
 
+    const trimmedName = customerName.trim();
+    const trimmedPhone = customerPhone.trim();
+
+    const finalizeAfterPayment = async () => {
+      try {
+        await confirmBooking({
+          holdIds,
+          customerDetails: {
+            customerName: trimmedName,
+            phoneNumber: trimmedPhone,
+            paymentType: 2,
+          },
+        });
+
+        setPageAlert({
+          visible: true,
+          variant: "success",
+          title: "Booking confirmed",
+          description:
+            "The badminton booking was confirmed successfully.",
+        });
+
+        setSelectedSlotsByCourt({});
+        setIsBookingModalOpen(false);
+        setCustomerName("");
+        setCustomerPhone("");
+        setHoldIds([]);
+        setHoldExpiresAt(null);
+      } catch (error) {
+        const message =
+          (error as any)?.response?.data
+            ?.message ||
+          (error as any)?.message ||
+          "Unable to confirm the booking.";
+
+        setPageAlert({
+          visible: true,
+          variant: "error",
+          title: "Confirmation failed",
+          description: message,
+        });
+      } finally {
+        setLoading(false);
+
+        setCustomerName("");
+        setCustomerPhone("");
+        setSelectedSlotsByCourt({});
+
+        await refreshSelectedDateSlots();
+      }
+    };
+
     try {
-      await confirmBooking({
+      const paymentResponse = await createBadmintonMultiPayment({
         holdIds,
-        customerDetails: {
-          customerName:
-            customerName.trim(),
-          phoneNumber:
-            customerPhone.trim(),
-          paymentType: 1,
-        },
+        customerName: trimmedName,
+        phoneNumber: trimmedPhone,
       });
 
-      setPageAlert({
-        visible: true,
-        variant: "success",
-        title: "Booking confirmed",
-        description:
-          "The badminton booking was confirmed successfully.",
-      });
+      console.log("[Badminton] payment creation response:", paymentResponse);
 
-      setSelectedSlotsByCourt({});
+      const payment =
+        paymentResponse?.additionalData?.response ??
+        paymentResponse?.response ??
+        paymentResponse;
+
+      // Close our own full-screen modal before handing off to PayHere — having
+      // two overlays open at once risks one burying the other (z-index conflict).
       setIsBookingModalOpen(false);
-      setCustomerName("");
-      setCustomerPhone("");
-      setHoldIds([]);
-      setHoldExpiresAt(null);
+
+      startPayHereCheckout(
+        {
+          orderId: payment.orderId,
+          merchantId: payment.merchantId,
+          currency: payment.currency,
+          amount: payment.amount,
+          hash: payment.hash,
+          items: "Badminton Court Booking",
+          firstName: trimmedName,
+          phone: trimmedPhone,
+          notifyPath: "badminton/bookings/notify",
+        },
+        {
+          onCompleted: () => {
+            void finalizeAfterPayment();
+          },
+          onDismissed: () => {
+            setLoading(false);
+            setIsBookingModalOpen(true);
+            setPageAlert({
+              visible: true,
+              variant: "warning",
+              title: "Payment cancelled",
+              description:
+                "Your selected slots are still held for a few more minutes. Complete payment to confirm your booking.",
+            });
+          },
+          onError: () => {
+            setLoading(false);
+            setIsBookingModalOpen(true);
+            setPageAlert({
+              visible: true,
+              variant: "error",
+              title: "Payment failed",
+              description:
+                "Something went wrong while processing your payment. Please try again.",
+            });
+          },
+        },
+      );
+
+      // Hand off to the PayHere popup — turn off our own overlay so it isn't
+      // hidden behind it while the customer completes payment.
+      setLoading(false);
     } catch (error) {
+      setLoading(false);
+      setIsBookingModalOpen(true);
+
       const message =
-        (error as any)?.response?.data
-          ?.message ||
+        (error as any)?.response?.data?.message ||
         (error as any)?.message ||
-        "Unable to confirm the booking.";
+        "Unable to initiate payment.";
 
       setPageAlert({
         visible: true,
         variant: "error",
-        title: "Confirmation failed",
+        title: "Payment initiation failed",
         description: message,
       });
-    } finally {
-      setLoading(false);
-
-      setCustomerName("");
-      setCustomerPhone("");
-      setSelectedSlotsByCourt({});
-
-      await refreshSelectedDateSlots();
     }
   };
 
@@ -1917,25 +2006,39 @@ export default function BadmintonBookings() {
                       <div className="grid gap-4 sm:grid-cols-2">
                         <label className="block">
                           <span className="mb-2 block text-xs font-bold text-gray-700">
-                            Customer Name
+                            Customer Name <span className="text-red-500">*</span>
                           </span>
 
                           <input
                             type="text"
+                            required
+                            aria-invalid={Boolean(customerNameError)}
                             value={customerName}
-                            onChange={(event) =>
-                              setCustomerName(
-                                event.target.value
-                              )
-                            }
+                            onChange={(event) => {
+                              setCustomerName(event.target.value);
+                              setCustomerNameError("");
+                            }}
                             placeholder="Enter customer name"
-                            className="h-12 w-full rounded-xl border border-gray-200 bg-white px-4 text-sm outline-none transition focus:border-amber-500 focus:ring-4 focus:ring-amber-100"
+                            className={`h-12 w-full rounded-xl border bg-white px-4 text-sm outline-none transition focus:ring-4 focus:ring-amber-100 ${
+                              customerNameError
+                                ? "border-red-400 focus:border-red-500 focus:ring-red-100"
+                                : "border-gray-200 focus:border-amber-500"
+                            }`}
                           />
+
+                          {customerNameError && (
+                            <span
+                              className="mt-1.5 block text-xs font-medium text-red-600"
+                              role="alert"
+                            >
+                              {customerNameError}
+                            </span>
+                          )}
                         </label>
 
                         <label className="block">
                           <span className="mb-2 block text-xs font-bold text-gray-700">
-                            Customer Mobile No
+                            Customer Mobile No <span className="text-red-500">*</span>
                           </span>
 
                           <input
