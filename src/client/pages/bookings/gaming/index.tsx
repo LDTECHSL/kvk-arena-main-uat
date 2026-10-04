@@ -363,7 +363,36 @@ export default function BookingGaming() {
     }
   };
 
-  const duration = selectedSlots.length;
+  const toMinutes = (time: string) => {
+    const [h, m] = time.split(":").map(Number);
+    return h * 60 + (m || 0);
+  };
+
+  const durationMinutes = useMemo(() => {
+    if (selectedSlots.length === 0) return 0;
+
+    const sorted = [...selectedSlots].sort((a, b) => a - b);
+
+    const firstSlot = masterSlots[sorted[0]];
+    const lastSlot = masterSlots[sorted[sorted.length - 1]];
+
+    if (!firstSlot || !lastSlot) return 0;
+
+    return toMinutes(lastSlot.endTime) - toMinutes(firstSlot.startTime);
+  }, [selectedSlots, masterSlots]);
+
+  const durationLabel = useMemo(() => {
+    if (durationMinutes <= 0) return "-";
+
+    const hours = Math.floor(durationMinutes / 60);
+    const mins = durationMinutes % 60;
+
+    const parts: string[] = [];
+    if (hours > 0) parts.push(`${hours} Hour${hours === 1 ? "" : "s"}`);
+    if (mins > 0) parts.push(`${mins} Min`);
+
+    return parts.join(" ");
+  }, [durationMinutes]);
 
   const selectedTimeRange = useMemo(() => {
     if (selectedSlots.length === 0) return "-";
@@ -415,13 +444,13 @@ export default function BookingGaming() {
     return { availableStations, full: availableStations.length === 0 };
   };
 
-  const total = useMemo(() => {
+  const bookingAmount = useMemo(() => {
     if (!selectedCategory || selectedSlots.length === 0) return 0;
 
     // Price per booking comes from the slot itself (kept in sync with the
     // cashier's slot configuration), not the station's own static price —
     // that field is set once at station creation and never updated.
-    const baseAmount = selectedSlots.reduce((slotSum, slotIndex) => {
+    return selectedSlots.reduce((slotSum, slotIndex) => {
       const slotTime = masterSlots[slotIndex];
       if (!slotTime) return slotSum;
 
@@ -435,23 +464,20 @@ export default function BookingGaming() {
 
       return slotSum + stationsSum;
     }, 0);
+  }, [selectedCategory, selectedSlots, selectedStations, masterSlots, stationSlots]);
 
-    const additionalAmount =
+  const consoleAmount = useMemo(() => {
+    if (selectedSlots.length === 0) return 0;
+
+    return (
       additionalPurchases.reduce((sum, purchase) => {
         const quantity = purchaseQuantities[purchase.id] ?? 0;
         return sum + quantity * purchase.price;
-      }, 0) * selectedSlots.length;
+      }, 0) * selectedSlots.length
+    );
+  }, [selectedSlots, additionalPurchases, purchaseQuantities]);
 
-    return baseAmount + additionalAmount;
-  }, [
-    selectedCategory,
-    selectedSlots,
-    selectedStations,
-    masterSlots,
-    stationSlots,
-    additionalPurchases,
-    purchaseQuantities,
-  ]);
+  const total = bookingAmount + consoleAmount;
 
   /* -------------------------------------------------------------------------- */
   /* Hold countdown                                                             */
@@ -1123,7 +1149,7 @@ export default function BookingGaming() {
                 <div>
                   <p className="text-xs text-gray-500">Duration</p>
                   <p className="font-semibold">
-                    {duration > 0 ? `${duration} Hour(s)` : "-"}
+                    {durationLabel}
                   </p>
                 </div>
 
@@ -1136,8 +1162,20 @@ export default function BookingGaming() {
                     </div>
                   ))}
 
-                <div className="border-t pt-4">
-                  <div className="flex justify-between items-center">
+                <div className="border-t pt-4 space-y-2">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-gray-500">Booking Amount</span>
+                    <span className="font-semibold text-gray-900">Rs. {bookingAmount}</span>
+                  </div>
+
+                  {consoleAmount > 0 && (
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-gray-500">Console Amount</span>
+                      <span className="font-semibold text-gray-900">Rs. {consoleAmount}</span>
+                    </div>
+                  )}
+
+                  <div className="flex justify-between items-center pt-2 border-t">
                     <span className="font-medium">Total Amount</span>
 
                     <span className="text-xl font-bold text-red-600">Rs. {total}</span>
@@ -1315,9 +1353,23 @@ export default function BookingGaming() {
                       <span className="text-right font-semibold text-gray-900">{selectedTimeRange}</span>
                     </div>
 
-                    <div className="border-t border-gray-200 mt-3 pt-3 flex justify-between items-center">
-                      <span className="font-bold text-gray-900">Total</span>
-                      <span className="text-xl font-black text-red-600">Rs. {total}</span>
+                    <div className="border-t border-gray-200 mt-3 pt-3 space-y-2">
+                      <div className="flex justify-between gap-3">
+                        <span className="shrink-0 text-gray-500">Booking Amount</span>
+                        <span className="font-semibold text-gray-900">Rs. {bookingAmount}</span>
+                      </div>
+
+                      {consoleAmount > 0 && (
+                        <div className="flex justify-between gap-3">
+                          <span className="shrink-0 text-gray-500">Console Amount</span>
+                          <span className="font-semibold text-gray-900">Rs. {consoleAmount}</span>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between items-center pt-2 border-t border-gray-200">
+                        <span className="font-bold text-gray-900">Total</span>
+                        <span className="text-xl font-black text-red-600">Rs. {total}</span>
+                      </div>
                     </div>
                   </div>
                 </div>
