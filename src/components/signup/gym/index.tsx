@@ -1,3 +1,4 @@
+import GymDataState from "@/components/gym-data-state";
 import { useState, useEffect } from "react";
 import gymImage from "@/assets/gym-signup.jpg";
 import { getMembershipPlans } from "@/services/memberships-api";
@@ -15,8 +16,11 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
   const [step, setStep] = useState(1);
   const [gender, setGender] = useState<number | null>(null);
   const [confirm, setConfirm] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [dataError, setDataError] = useState(false);
   const [plans, setPlans] = useState<any[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [registeredMemberId, setRegisteredMemberId] = useState<string | null>(null);
   const [pageAlert, setPageAlert] = useState<{
     visible: boolean;
     variant?: "success" | "error" | "warning" | "info";
@@ -29,11 +33,16 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
 
 
   const fetchMembershipPlans = async () => {
+    setIsDataLoading(true);
+    setDataError(false);
     try {
       const res = await getMembershipPlans();
       setPlans(res.additionalData.response.filter((plan: any) => Number(plan.isActive) === 1));
     } catch (error) {
       console.error("Error fetching membership plans:", error);
+      setDataError(true);
+    } finally {
+      setIsDataLoading(false);
     }
   };
 
@@ -70,6 +79,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
     setGender(null);
     setConfirm(false);
     setSelectedPlan(null);
+    setRegisteredMemberId(null);
     setPageAlert({ visible: false });
     setLoading(false);
     setPaymentInProgress(false);
@@ -239,7 +249,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
   }, [open]);
 
   const handleRegister = async () => {
-    if (!validate()) return;
+    if (!validate() || !selectedPlan) return null;
     setServerError(null);
     setLoading(true);
     try {
@@ -262,16 +272,11 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
         res?.additionalData?.response ?? res?.response ?? res ?? null;
       const newMemberId = created?.id ?? created?.memberId ?? null;
 
+      if (!newMemberId) throw new Error("Registration did not return a member ID. Please contact the gym before retrying.");
+
       localStorage.setItem("newMemberId", newMemberId);
-
-      setPageAlert({
-        visible: true,
-        variant: "success",
-        title: "Details Saved",
-        description: "The member details have been successfully saved.",
-      });
-
-      setStep(2);
+      setRegisteredMemberId(newMemberId);
+      return newMemberId as string;
     } catch (error: any) {
       const message =
         error?.response?.data?.message ||
@@ -280,15 +285,13 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
 
       setServerError(message);
 
-      localStorage.setItem("newMemberId", "");
       setPageAlert({
         visible: true,
         variant: "error",
         title: "Registration Failed",
-        description:
-          error.response.data.message ||
-          "An error occurred while registering the member. Please try again.",
+        description: message,
       });
+      return null;
     } finally {
       setLoading(false);
     }
@@ -298,9 +301,14 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
     if (paymentInProgress || !selectedPlan) return;
     setPaymentInProgress(true);
     try {
+      const memberId = registeredMemberId ?? await handleRegister();
+      if (!memberId) {
+        setPaymentInProgress(false);
+        return;
+      }
       await startGymPayment({
         amount: Number(plans.find((p) => p.id === selectedPlan)?.price ?? 0),
-        memberId: localStorage.getItem("newMemberId") ?? "",
+        memberId,
         membershipPlanId: selectedPlan,
       }, { firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone }, paymentCallbacks);
       
@@ -715,11 +723,12 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
 
                 {/* BUTTON */}
                 <button
-                  onClick={async () => {
+                  onClick={() => {
                     const ok = validate();
                     if (!ok) return;
 
-                    await handleRegister();
+                    setServerError(null);
+                    setStep(2);
                   }}
                   disabled={!isValid || loading}
                   className={`mt-6 h-11 w-full rounded-xl text-sm font-semibold transition ${
@@ -728,7 +737,7 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
                       : "cursor-not-allowed bg-slate-200 text-slate-400"
                   }`}
                 >
-                  {loading ? "Processing..." : "Submit & Next"}
+                  Continue to Membership
                 </button>
               </>
             )}
@@ -746,6 +755,9 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
                   </p>
                 </div>
 
+                {(isDataLoading || dataError || plans.length === 0) && (
+                  <GymDataState loading={isDataLoading} error={dataError} label="membership plans" onRetry={() => void fetchMembershipPlans()} />
+                )}
                 {/* PLAN CARDS */}
                 <div className="grid gap-3 md:grid-cols-2">
                   {plans
@@ -818,6 +830,12 @@ export default function SignupModal({ open, onClose }: SignupModalProps) {
 
                 {/* ACTIONS */}
                 <div className="mt-6 flex gap-3">
+                  {!registeredMemberId && <button
+                    type="button"
+                    disabled={loading || paymentInProgress}
+                    onClick={() => setStep(1)}
+                    className="h-11 rounded-xl border border-slate-200 px-4 text-sm font-semibold text-slate-600 disabled:opacity-50"
+                  >Back</button>}
                   <button
                     disabled={!selectedPlan || loading || paymentInProgress}
                     onClick={async () => {

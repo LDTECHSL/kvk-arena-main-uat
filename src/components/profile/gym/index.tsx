@@ -1,3 +1,4 @@
+import GymDataState from "@/components/gym-data-state";
 import Alert from "@/components/alert";
 import { changePassword, getMember, updateMember } from "@/services/auth-api";
 import { getMembershipPlans } from "@/services/memberships-api";
@@ -35,6 +36,10 @@ export default function UserProfileModal({
 }: UserProfileModalProps) {
 
   const [memberData, setMemberData] = useState<any>(null);
+  const assignedTrainerName =
+    typeof memberData?.assignedTrainer === "string"
+      ? memberData.assignedTrainer.trim()
+      : "";
   const [isEditing, setIsEditing] = useState(false);
   const [form, setForm] = useState({
     firstName: "",
@@ -50,6 +55,8 @@ export default function UserProfileModal({
     description?: string;
   }>({ visible: false });
   const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [isDataLoading, setIsDataLoading] = useState(true);
+  const [dataError, setDataError] = useState(false);
   const [plans, setPlans] = useState<any[]>([]);
   const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
   const [isPlanEnd, setIsPlanEnd] = useState(false);
@@ -96,6 +103,20 @@ export default function UserProfileModal({
   });
 
   const memberId = localStorage.getItem("memberId") || "N/A";
+  const [trainerImagePreview, setTrainerImagePreview] = useState("");
+  useEffect(() => {
+    if (!showEditTrainerModal) {
+      setTrainerImagePreview("");
+      return;
+    }
+    const picture = trainerForm.profilePicture;
+    if (picture instanceof File) {
+      const objectUrl = URL.createObjectURL(picture);
+      setTrainerImagePreview(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+    setTrainerImagePreview(picture ? `data:image/jpeg;base64,${picture}` : "");
+  }, [trainerForm.profilePicture, showEditTrainerModal]);
   const memberName = localStorage.getItem("memberName") || "N/A";
   const memberEmail = localStorage.getItem("memberEmail") || "N/A";
   // Ensure memberToken is always a string, default to empty string if null/undefined
@@ -114,11 +135,16 @@ export default function UserProfileModal({
   };
 
   const fetchMembershipPlans = async () => {
+    setIsDataLoading(true);
+    setDataError(false);
     try {
       const res = await getMembershipPlans();
       setPlans(res.additionalData.response.filter((plan: any) => Number(plan.isActive) === 1));
     } catch (error) {
       console.error("Error fetching membership plans:", error);
+      setDataError(true);
+    } finally {
+      setIsDataLoading(false);
     }
   };
 
@@ -537,6 +563,9 @@ export default function UserProfileModal({
                 </div>
               </div>
 
+              {(isDataLoading || dataError || plans.length === 0) && (
+                <GymDataState loading={isDataLoading} error={dataError} label="membership plans" onRetry={() => void fetchMembershipPlans()} />
+              )}
               <div className="grid gap-3 md:grid-cols-2 mt-6">
                 {plans
                   .filter((p) => p.isActive === 1)
@@ -1022,7 +1051,7 @@ export default function UserProfileModal({
 
                   {/* TRAINER */}
 
-                  {memberData?.assignedTrainer !== null ? (
+                  {assignedTrainerName ? (
                     <div className="bg-white rounded-3xl p-6 shadow-xl border">
                       <h3 className="text-xl font-bold mb-5">
                         Personal Trainer
@@ -1035,7 +1064,7 @@ export default function UserProfileModal({
 
                         <div>
                           <h4 className="font-semibold">
-                            {memberData?.trainerName || ""}
+                            {assignedTrainerName}
                           </h4>
                           <p className="text-sm text-slate-500">Trainer</p>
                         </div>
@@ -1135,11 +1164,7 @@ export default function UserProfileModal({
                     >
                       {memberData?.profilePicture ? (
                         <img
-                          src={
-                            trainerForm.profilePicture instanceof File
-                              ? URL.createObjectURL(memberData?.profilePicture)
-                              : `data:image/jpeg;base64,${memberData?.profilePicture}`
-                          }
+                          src={`data:image/jpeg;base64,${memberData.profilePicture}`}
                           alt="Profile"
                           className="h-full w-full object-cover"
                         />
@@ -1891,11 +1916,7 @@ export default function UserProfileModal({
                     {trainerForm.profilePicture ? (
                       <>
                         <img
-                          src={
-                            trainerForm.profilePicture instanceof File
-                              ? URL.createObjectURL(trainerForm.profilePicture)
-                              : `data:image/jpeg;base64,${trainerForm.profilePicture}`
-                          }
+                          src={trainerImagePreview || undefined}
                           alt="Profile Preview"
                           className="w-full h-full object-cover"
                         />
