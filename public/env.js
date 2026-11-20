@@ -8,7 +8,7 @@ window.env = {
   GYM_RATE: "10",
   BADMINTON_RATE: "10",
   // Member badminton booking start date (YYYY-MM-DD). Leave empty until set.
-  BADMINTON_BOOKING_START_DATE: "2026-12-01",
+  BADMINTON_BOOKING_START_DATE: "2026-12-02",
   BADMINTON_BANK_NAME: "Hatton National Bank",
   BADMINTON_ACCOUNT_OWNER_NAME: "M/S. KVK ARENA (PVT) LTD",
   BADMINTON_ACCOUNT_NUMBER: "0961022404",
