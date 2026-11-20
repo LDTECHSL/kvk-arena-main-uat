@@ -8,13 +8,13 @@ window.env = {
   GYM_RATE: "10",
   BADMINTON_RATE: "10",
   // Member badminton booking start date (YYYY-MM-DD). Leave empty until set.
-  BADMINTON_BOOKING_START_DATE: "2026-11-29",
+  BADMINTON_BOOKING_START_DATE: "2026-12-01",
   BADMINTON_BANK_NAME: "Hatton National Bank",
   BADMINTON_ACCOUNT_OWNER_NAME: "M/S. KVK ARENA (PVT) LTD",
   BADMINTON_ACCOUNT_NUMBER: "0961022404",
   BADMINTON_BRANCH_NAME: "Colombo 13",
   BADMINTON_PAYMENT_INSTRUCTIONS: "", // Approved bank transfer instructions shown on the tracking page.
-  MAXIMUM_DISCOUNTABLE_SLOTS: 5, // The API enforces its configured upper limit.
+  MAXIMUM_DISCOUNTABLE_SLOTS: 10, // The API enforces its configured upper limit.
   BOOKING_DURATION: "12", //weeks
   COUPON_CODE_ID: "b025087f-c79b-4eea-8945-566226168557",
   CARWASH_RATE: "10",
