@@ -11,7 +11,7 @@ window.env = {
   BADMINTON_BOOKING_START_DATE: "2026-12-02",
   BADMINTON_BANK_NAME: "Hatton National Bank",
   BADMINTON_ACCOUNT_OWNER_NAME: "M/S. KVK ARENA (PVT) LTD",
-  BADMINTON_ACCOUNT_NUMBER: "09601022404",
+  BADMINTON_ACCOUNT_NUMBER: "096010224044",
   BADMINTON_BRANCH_NAME: "Colombo 13",
   BADMINTON_PAYMENT_INSTRUCTIONS: "", // Approved bank transfer instructions shown on the tracking page.
   MAXIMUM_DISCOUNTABLE_SLOTS: 10, // The API enforces its configured upper limit.
