@@ -1,4 +1,4 @@
-import { Route, Routes } from "react-router-dom"
+import { Routes } from "react-router-dom"
 // import Home from "./client/pages/home"
 // import NotFound from "./client/pages/not-found"
 import "leaflet/dist/leaflet.css";
